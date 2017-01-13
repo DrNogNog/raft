@@ -103,7 +103,8 @@ func (kv *RaftKV) Get(args GetArgs, reply *GetReply) {
 
 	logIndex, _, _ := kv.rf.Start(op.op)
 
-	kv.DPrintf("[Get] From client %d, key = %s, serial = %d, log = %d.\n", args.Client, args.Key, args.ReqSerial, logIndex)
+	kv.DPrintf("[Get] From client %d, key = %s, serial = %d, log = %d.\n",
+		args.Client, args.Key, args.ReqSerial, logIndex)
 
 	// Timer is necessary as this log can never be committed if server loses leadership.
 	timer := time.NewTimer(time.Duration(300) * time.Millisecond)
@@ -170,18 +171,21 @@ func (kv *RaftKV) PutAppend(args PutAppendArgs, reply *PutAppendReply) {
 
 	logIndex, _, _ := kv.rf.Start(op.op)
 
-	kv.DPrintf("[%s] From client %d, key = %s, value = %s, serial = %d, log = %d.\n", args.Op, args.Client, args.Key, args.Value, args.ReqSerial, logIndex)
+	kv.DPrintf("[%s] From client %d, key = %s, value = %s, serial = %d, log = %d.\n",
+		args.Op, args.Client, args.Key, args.Value, args.ReqSerial, logIndex)
 
 	// Timer is necessary as this log can never be committed if server loses its leadership.
 	timer := time.NewTimer(time.Duration(250) * time.Millisecond)
 
 	select {
 		case <- timer.C: {
-			kv.DPrintf("[%s] TimeOut. Client %d, key = %s, value = %s, serial = %d.\n", args.Op, args.Client, args.Key, args.Value, args.ReqSerial)
+			kv.DPrintf("[%s] TimeOut. Client %d, key = %s, value = %s, serial = %d.\n",
+				args.Op, args.Client, args.Key, args.Value, args.ReqSerial)
 			reply.Err = TimeOut
 		}
 		case <-op.doneCh: {
-			kv.DPrintf("[%s] Executed OK. Client %d, key = %s, value = %s, serial = %d.\n", args.Op, args.Client, args.Key, args.Value, args.ReqSerial)
+			kv.DPrintf("[%s] Executed OK. Client %d, key = %s, value = %s, serial = %d.\n",
+				args.Op, args.Client, args.Key, args.Value, args.ReqSerial)
 		}
 	}
 
@@ -205,7 +209,8 @@ func (kv *RaftKV) executeLog(applyMsg raft.ApplyMsg) {
 
 	if kv.executedTo[op.Client] > op.ReqSerial {
 		// This is an already committed log. Ignore.
-		kv.DPrintf("Committing an already committed log %d, client = %d, serial = %d, %d %s %s. Ignored.\n", applyMsg.Index, op.Client, op.ReqSerial, op.Type, op.Key, op.Value)
+		kv.DPrintf("Committing an already committed log %d, client = %d, serial = %d, %d %s %s. Ignored.\n",
+			applyMsg.Index, op.Client, op.ReqSerial, op.Type, op.Key, op.Value)
 		return
 	} else if op.ReqSerial - kv.executedTo[op.Client] > 1 {
 		kv.DPrintf("FATAL: Missing logs client = %d, %d %d.\n", op.Client, kv.executedTo[op.Client], op.ReqSerial)

@@ -109,6 +109,7 @@ func (rf *Raft) GetState() (int, bool) {
 func (rf *Raft) Persister() *Persister {
 	return rf.persister
 }
+
 //
 // save Raft's persistent state to stable storage,
 // where it can later be retrieved after a crash and restart.
@@ -207,20 +208,7 @@ type InstallSnapshotReply struct {
 
 //
 // Send a RequestVote RPC to a server.
-// server is the index of the target server in rf.peers[].
-// expects RPC arguments in args.
-// fills in *reply with RPC reply, so caller should
-// pass &reply.
-// the types of the args and reply passed to Call() must be
-// the same as the types of the arguments declared in the
-// handler function (including whether they are pointers).
-//
-// returns true if labrpc says the RPC was delivered.
-//
-// if you're having trouble getting RPC to work, check that you've
-// capitalized all field names in structs passed over RPC, and
-// that the caller passes the address of the reply struct with &, not
-// the struct itself.
+// Returns true if labrpc says the RPC was delivered.
 //
 func (rf *Raft) sendRequestVote(server int, args RequestVoteArgs, reply *RequestVoteReply) bool {
 	return rf.peers[server].Call("Raft.RequestVote", args, reply)
@@ -264,7 +252,8 @@ func (rf *Raft) lastLogIndex() (int, int) {
 // Check if we are stale leader lag behind, then catch up and convert ourselves into follower.
 func (rf *Raft) checkStaleLeader(tag string, term int, peer int) bool {
 	if rf.currentTerm < term {
-		rf.DPrintf("[%s] Stale leader at term %d, %d has a higher term %d, converting to follower.\n", tag, rf.currentTerm, peer, term)
+		rf.DPrintf("[%s] Stale leader at term %d, %d has a higher term %d, converting to follower.\n",
+			tag, rf.currentTerm, peer, term)
 		rf.setCurrentTerm(term)
 		rf.downRole()
 		return true
@@ -473,7 +462,8 @@ func (rf *Raft) InstallSnapshot(args InstallSnapshotArgs, reply *InstallSnapshot
 	reply.Success = true
 
 	if args.LastIncludedIndex <= rf.commitIndex {
-		rf.DPrintf("Stale InstallSnapshot from %d, lastIncludedIndex = %d, commitIndex = %d.\n", args.LeaderId, args.LastIncludedIndex, rf.commitIndex)
+		rf.DPrintf("Stale InstallSnapshot from %d, lastIncludedIndex = %d, commitIndex = %d.\n",
+			args.LeaderId, args.LastIncludedIndex, rf.commitIndex)
 		return
 	}
 
@@ -489,7 +479,6 @@ func (rf *Raft) InstallSnapshot(args InstallSnapshotArgs, reply *InstallSnapshot
 }
 
 // Consistent log should contain the entry at PrevLogIndex whose term matches PrevLogTerm.
-// Lock must be held.
 func (rf *Raft) checkLogConsistency(args AppendEntriesArgs) (bool, int) {
 	lastLogIndex, _ := rf.lastLogIndex()
 	if lastLogIndex < args.PrevLogIndex {
@@ -536,7 +525,8 @@ func (rf *Raft) followerLoop() {
 			case heartBeat := <-rf.heartBeatCh: {
 				rf.mu.Lock()
 				// Received a heart beat from a leader.
-				rf.DPrintf("Processing heartbeat from leader %d with term %d, my term is %d.\n", heartBeat.leaderId, heartBeat.term, rf.currentTerm)
+				rf.DPrintf("Processing heartbeat from leader %d with term %d, my term is %d.\n",
+					heartBeat.leaderId, heartBeat.term, rf.currentTerm)
 				if heartBeat.term < rf.currentTerm {
 					// The leader is a stale leader, ignore and let the next time's firing handles it.
 					rf.DPrintf("Heartbeat is from a stale leader, ignore.\n")
@@ -725,7 +715,8 @@ func (rf *Raft) leaderSyncLogs(server int) {
 		if sendSnapshot {
 			if replySnapshot.Success {
 				setLastIndex(argsSnapshot.LastIncludedIndex)
-				rf.DPrintf("Snapshot replicated to server %d nextIndex = %d, matchIndex = %d.\n", server, rf.nextIndex[server], rf.matchIndex[server])
+				rf.DPrintf("Snapshot replicated to server %d nextIndex = %d, matchIndex = %d.\n",
+					server, rf.nextIndex[server], rf.matchIndex[server])
 				rf.mu.Unlock()
 				return
 			}
@@ -733,14 +724,16 @@ func (rf *Raft) leaderSyncLogs(server int) {
 			if replyAppend.Success {
 				setLastIndex(lastLogIndex)
 				if len(argsAppend.Entries) != 0 {
-					rf.DPrintf("Log replicated to server %d nextIndex = %d, matchIndex = %d.\n", server, rf.nextIndex[server], rf.matchIndex[server])
+					rf.DPrintf("Log replicated to server %d nextIndex = %d, matchIndex = %d.\n",
+						server, rf.nextIndex[server], rf.matchIndex[server])
 				}
 				rf.mu.Unlock()
 				return
 			} else if replyAppend.NextIndex != -1 {
 				// Rejected because of inconsistent logs.
 				rf.nextIndex[server] = replyAppend.NextIndex + 1
-				rf.DPrintf("Failed to AppendEntries for server %d, retry with decreasing nextIndex to %d.\n", server, rf.nextIndex[server])
+				rf.DPrintf("Failed to AppendEntries for server %d, retry with decreasing nextIndex to %d.\n",
+					server, rf.nextIndex[server])
 			}
 		}
 
