@@ -66,10 +66,9 @@ func hashClientAndSerial(client int, serial int) int64 {
 func (kv *RaftKV) Get(args GetArgs, reply *GetReply) {
 	_, isLeader := kv.rf.GetState()
 	if !isLeader {
-		reply.WrongLeader = true
+		reply.Err = WrongLeader
 		return
 	}
-	reply.WrongLeader = false
 	reply.Err = OK
 
 	kv.mu.Lock()
@@ -137,10 +136,9 @@ func (kv *RaftKV) Get(args GetArgs, reply *GetReply) {
 func (kv *RaftKV) PutAppend(args PutAppendArgs, reply *PutAppendReply) {
 	_, isLeader := kv.rf.GetState()
 	if !isLeader {
-		reply.WrongLeader = true
+		reply.Err = WrongLeader
 		return
 	}
-	reply.WrongLeader = false
 	reply.Err = OK
 
 	kv.mu.Lock()

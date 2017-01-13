@@ -1,9 +1,7 @@
 package raftkv
 
 import (
-	"crypto/rand"
 	"labrpc"
-	"math/big"
 	"sync"
 )
 
@@ -14,13 +12,6 @@ type Clerk struct {
 	me         int  // client id
 	reqSerial  int  // serial number for next request
 	lastLeader int  // last cached leader
-}
-
-func nrand() int64 {
-	max := big.NewInt(int64(1) << 62)
-	bigx, _ := rand.Int(rand.Reader, max)
-	x := bigx.Int64()
-	return x
 }
 
 var CLIENT_MUTEX sync.Mutex
@@ -75,7 +66,7 @@ func (ck *Clerk) Get(key string) string {
 		args.Client = ck.me
 		args.ReqSerial = ck.reqSerial
 
-		if ck.servers[i].Call("RaftKV.Get", args, &reply) && !reply.WrongLeader && reply.Err == OK {
+		if ck.servers[i].Call("RaftKV.Get", args, &reply) && reply.Err == OK {
 			ck.lastLeader = i
 			return reply, true
 		}
@@ -130,7 +121,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		args.Client = ck.me
 		args.ReqSerial = ck.reqSerial
 
-		if ck.servers[i].Call("RaftKV.PutAppend", args, &reply) && !reply.WrongLeader && reply.Err == OK {
+		if ck.servers[i].Call("RaftKV.PutAppend", args, &reply) && reply.Err == OK {
 			ck.lastLeader = i
 			return reply, true
 		}
