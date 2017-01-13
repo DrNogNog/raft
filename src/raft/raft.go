@@ -63,8 +63,6 @@ type Raft struct {
 	persister *Persister
 	me        int  // index into peers[]
 
-	killed      bool
-
 	role        Role  // role
 	currentTerm int   // latest term server has seen
 	voteFor     int   // candidateId that received vote in currentTerm, -1 if no vote.
@@ -75,6 +73,7 @@ type Raft struct {
 	                  // logs = [ 0, startIndex + 1, startIndex + 2, ... ]
 					  // invariant: commitIndex >= startIndex
 
+	killCh      chan struct{}  // killed
 	downRoleCh  chan struct{}  // down to follower if set
 	heartBeatCh chan HeartBeat // heartbeats
 	applyCh     chan ApplyMsg  // log is applied
@@ -94,7 +93,7 @@ type HeartBeat struct {
 const Debug = 0
 
 func (rf *Raft) DPrintf(format string, a ...interface{}) {
-	if Debug > 0 && !rf.killed {
+	if Debug > 0 {
 		log.SetPrefix(fmt.Sprintf("[%d] ", rf.me))
 		log.Printf(format, a...)
 	}
@@ -531,6 +530,9 @@ func (rf *Raft) followerLoop() {
 
 	for {
 		select {
+			case <-rf.killCh: {
+				return
+			}
 			case heartBeat := <-rf.heartBeatCh: {
 				rf.mu.Lock()
 				// Received a heart beat from a leader.
@@ -595,6 +597,9 @@ func (rf *Raft) candidateLoop() {
 L:
 		for {
 			select {
+				case <-rf.killCh: {
+					return
+				}
 				case <- rf.downRoleCh: {
 					rf.DPrintf("Converting to follower because of downRoleCh.\n")
 					go rf.followerLoop()
@@ -854,6 +859,9 @@ func (rf *Raft) leaderLoop() {
 L:
 		for {
 			select {
+				case <-rf.killCh: {
+					return
+				}
 				case <-rf.downRoleCh: {
 					rf.DPrintf("Converting to follower because of downRoleCh.\n")
 					go rf.followerLoop()
@@ -931,7 +939,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 // the tester calls Kill() when a Raft instance won't be needed again.
 //
 func (rf *Raft) Kill() {
-	rf.killed = true
+	rf.killCh <- struct{}{}
 }
 
 //
@@ -962,6 +970,7 @@ func Make(peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan 
 	rf.currentTerm = 0
 	rf.voteFor = -1
 
+	rf.killCh = make(chan struct{})
 	rf.downRoleCh = make(chan struct{})
 	rf.heartBeatCh = make(chan HeartBeat)
 	rf.applyCh = applyCh

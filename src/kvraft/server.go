@@ -49,11 +49,11 @@ type RaftKV struct {
 	lastResult map[int]string     // execution result of last request
 	ops        map[int64]*RaftOp  // pending ops, keyed by client and request serial number
 
-	killed     bool
+	killCh     chan struct{}
 }
 
 func (kv *RaftKV) DPrintf(format string, a ...interface{}) {
-	if Debug > 0 && !kv.killed {
+	if Debug > 0 {
 		log.SetPrefix(fmt.Sprintf("[KV][%d] ", kv.me))
 		log.Printf(format, a...)
 	}
@@ -197,7 +197,7 @@ func (kv *RaftKV) PutAppend(args PutAppendArgs, reply *PutAppendReply) {
 	kv.mu.Unlock()
 }
 
-func (kv *RaftKV) execute(applyMsg raft.ApplyMsg) {
+func (kv *RaftKV) executeLog(applyMsg raft.ApplyMsg) {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
@@ -250,6 +250,17 @@ func (kv *RaftKV) execute(applyMsg raft.ApplyMsg) {
 	}
 }
 
+func (kv *RaftKV) installSnapshot(applyMsg raft.ApplyMsg) {
+	kv.mu.Lock()
+	kv.readSnapshot(applyMsg.Snapshot)
+	kv.snapshot()
+	go func(index int, term int) {
+		kv.rf.DiscardLogs(index, term)
+	}(applyMsg.Index, applyMsg.Term)
+	kv.mu.Unlock()
+	kv.DPrintf("Snapshot reloaded to log index = %d.\n", applyMsg.Index)
+}
+
 func (kv *RaftKV) snapshot() {
 	w := new(bytes.Buffer)
 	e := gob.NewEncoder(w)
@@ -276,7 +287,7 @@ func (kv *RaftKV) readSnapshot(data []byte) {
 //
 func (kv *RaftKV) Kill() {
 	kv.rf.Kill()
-	kv.killed = true
+	kv.killCh <- struct{}{}
 }
 
 //
@@ -310,25 +321,25 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
+	kv.killCh = make(chan struct{})
+
 	kv.readSnapshot(kv.rf.Persister().ReadSnapshot())
 
 	kv.DPrintf("KV server is up, kv = %v.\n", kv.kv)
 
 	go func() {
 		for {
-			applyMsg := <-kv.applyCh
-
-			if applyMsg.UseSnapshot {
-				kv.mu.Lock()
-				kv.readSnapshot(applyMsg.Snapshot)
-				kv.snapshot()
-				go func(index int, term int) {
-					kv.rf.DiscardLogs(index, term)
-				}(applyMsg.Index, applyMsg.Term)
-				kv.mu.Unlock()
-				kv.DPrintf("Snapshot reloaded to log index = %d.\n", applyMsg.Index)
-			} else {
-				kv.execute(applyMsg)
+			select {
+				case <-kv.killCh: {
+					return
+				}
+				case applyMsg := <-kv.applyCh: {
+					if applyMsg.UseSnapshot {
+						kv.installSnapshot(applyMsg)
+					} else {
+						kv.executeLog(applyMsg)
+					}
+				}
 			}
 		}
 	}()
