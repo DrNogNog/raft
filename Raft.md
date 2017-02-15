@@ -43,3 +43,26 @@ Raft's basic approach is to implement a *replicated state machine*. Raft organiz
   4) Leader Completeness: if a log entry is committed in a given term, then that entry will be present in the logs of the leaders for all higher-numbered terms.
 
   5) State Machine Safety: if a server has applied a log entry at a given index to its state machine, no other server will ever apply a different log entry for the same index.
+
+## Notes on RPC
+
+RPC is built on top of TCP/IP protocol, no re-ordering but may drop message. Dropping message between Raft servers is okay, but goes a little different when we are considering key/value servers built on top of Raft.
+
+The key/value client is not running concurrently (only one thread/goroutine talking to server), this means the serial identifier of client's request is appearing in the increasing order, but not strictly increasing because network may drop message. When the client gets time-out, it will re-send a request with the same serial identifier. The problem is how could key/value server handle duplicate requests?
+
+        client                 server
+        PUT 1            -->
+                         <--   (network drops it) PUT 1 OK
+        PUT 1 timeout
+        PUT 1            -->
+                               PUT 1 (a duplicate request, re-execute or ignore?)
+
+We choose the at-most-once semantic to avoid duplicate requests.
+
+* Client's unique identifier.
+
+* Request's strictly increasing serial identifier.
+
+* Server caches last request's execute result.
+
+* (if re-ordering exists) or server maintains a window of executed results, and client includes the last continuous identifier of received result from server, so the server can shrink the window to fit in memory.
