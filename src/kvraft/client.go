@@ -10,7 +10,7 @@ type Clerk struct {
 
 	// You will have to modify this struct.
 	me         int  // client id
-	reqSerial  int  // serial number for next request
+	seqNo      int  // sequence number for next request
 	lastLeader int  // last cached leader
 }
 
@@ -32,7 +32,7 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	defer increaseClientId()
 
 	ck.me = CLIENT_ALLOC_ID
-	ck.reqSerial = 1
+	ck.seqNo = 1
 	ck.lastLeader = -1
 
 	return ck
@@ -51,12 +51,12 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // arguments. and reply must be passed as a pointer.
 //
 
-func (ck *Clerk) increaseReqSerial() {
-	ck.reqSerial += 1
+func (ck *Clerk) increaseSeqNo() {
+	ck.seqNo += 1
 }
 
 func (ck *Clerk) Get(key string) string {
-	defer ck.increaseReqSerial()
+	defer ck.increaseSeqNo()
 
 	var get = func(i int) (GetReply, bool) {
 		var args GetArgs
@@ -64,7 +64,7 @@ func (ck *Clerk) Get(key string) string {
 
 		args.Key = key
 		args.Client = ck.me
-		args.ReqSerial = ck.reqSerial
+		args.SeqNo = ck.seqNo
 
 		if ck.servers[i].Call("RaftKV.Get", args, &reply) && reply.Err == OK {
 			ck.lastLeader = i
@@ -109,7 +109,7 @@ func (ck *Clerk) Get(key string) string {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
-	defer ck.increaseReqSerial()
+	defer ck.increaseSeqNo()
 
 	var putappend = func(i int) (PutAppendReply, bool) {
 		var args PutAppendArgs
@@ -119,7 +119,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		args.Value = value
 		args.Op = op
 		args.Client = ck.me
-		args.ReqSerial = ck.reqSerial
+		args.SeqNo = ck.seqNo
 
 		if ck.servers[i].Call("RaftKV.PutAppend", args, &reply) && reply.Err == OK {
 			ck.lastLeader = i

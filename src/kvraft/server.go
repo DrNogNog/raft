@@ -26,7 +26,7 @@ type Op struct {
 	Value     string  // value is returned here for Get
 
 	Client    int
-	ReqSerial int
+	SeqNo     int
 }
 
 type RaftOp struct {
@@ -45,9 +45,9 @@ type RaftKV struct {
 	snapshotting bool
 
 	kv         map[string]string
-	executedTo map[int]int        // serial number of request the client is executed to
+	executedTo map[int]int        // sequence number of request the client is executed to
 	lastResult map[int]string     // execution result of last request
-	ops        map[int64]*RaftOp  // pending ops, keyed by client and request serial number
+	ops        map[int64]*RaftOp  // pending ops, keyed by client and request sequence number
 
 	killCh     chan struct{}
 }
@@ -59,8 +59,8 @@ func (kv *RaftKV) DPrintf(format string, a ...interface{}) {
 	}
 }
 
-func hashClientAndSerial(client int, serial int) int64 {
-	return int64(client) << 32 | int64(serial)
+func hashClientAndSeqNo(client int, seqNo int) int64 {
+	return int64(client) << 32 | int64(seqNo)
 }
 
 func (kv *RaftKV) Get(args GetArgs, reply *GetReply) {
@@ -74,14 +74,14 @@ func (kv *RaftKV) Get(args GetArgs, reply *GetReply) {
 	kv.mu.Lock()
 
 	// Check if this operation has already been executed.
-	if kv.executedTo[args.Client] > args.ReqSerial {
+	if kv.executedTo[args.Client] > args.SeqNo {
 		// As there is only one client, and the client's request is executed to at least
-		// kv.executedTo, but server finds client is doing request with serial < kv.executedTo.
+		// kv.executedTo, but server finds client is doing request with seqNo < kv.executedTo.
 		// ? ? ?
 		reply.Err = BadRequest
 		kv.mu.Unlock()
 		return
-	} else if kv.executedTo[args.Client] == args.ReqSerial {
+	} else if kv.executedTo[args.Client] == args.SeqNo {
 		reply.Value = kv.lastResult[args.Client]
 		kv.mu.Unlock()
 		return
@@ -93,28 +93,28 @@ func (kv *RaftKV) Get(args GetArgs, reply *GetReply) {
 	op.op.Client = args.Client
 	op.op.Key = args.Key
 	op.op.Type = Get
-	op.op.ReqSerial = args.ReqSerial
+	op.op.SeqNo = args.SeqNo
 
-	hash := hashClientAndSerial(op.op.Client, op.op.ReqSerial)
+	hash := hashClientAndSeqNo(op.op.Client, op.op.SeqNo)
 	kv.ops[hash] = op
 
 	kv.mu.Unlock()
 
 	logIndex, _, _ := kv.rf.Start(op.op)
 
-	kv.DPrintf("[Get] From client %d, key = %s, serial = %d, log = %d.\n",
-		args.Client, args.Key, args.ReqSerial, logIndex)
+	kv.DPrintf("[Get] From client %d, key = %s, seqno = %d, log = %d.\n",
+		args.Client, args.Key, args.SeqNo, logIndex)
 
 	// Timer is necessary as this log can never be committed if server loses leadership.
 	timer := time.NewTimer(time.Duration(300) * time.Millisecond)
 
 	select {
 		case <- timer.C: {
-			kv.DPrintf("[Get] TimeOut. Client %d, key = %s, serial = %d.\n", args.Client, args.Key, args.ReqSerial)
+			kv.DPrintf("[Get] TimeOut. Client %d, key = %s, seqno = %d.\n", args.Client, args.Key, args.SeqNo)
 			reply.Err = TimeOut
 		}
 		case <-op.doneCh: {
-			kv.DPrintf("[Get] Executed OK. Client %d, key = %s, serial = %d.\n", args.Client, args.Key, args.ReqSerial)
+			kv.DPrintf("[Get] Executed OK. Client %d, key = %s, seqno = %d.\n", args.Client, args.Key, args.SeqNo)
 			kv.mu.Lock()
 			reply.Value = op.value
 			kv.mu.Unlock()
@@ -144,7 +144,7 @@ func (kv *RaftKV) PutAppend(args PutAppendArgs, reply *PutAppendReply) {
 	kv.mu.Lock()
 
 	// Check if this operation has already been executed.
-	if kv.executedTo[args.Client] >= args.ReqSerial {
+	if kv.executedTo[args.Client] >= args.SeqNo {
 		kv.mu.Unlock()
 		return
 	}
@@ -160,30 +160,30 @@ func (kv *RaftKV) PutAppend(args PutAppendArgs, reply *PutAppendReply) {
 	} else {
 		op.op.Type = Append
 	}
-	op.op.ReqSerial = args.ReqSerial
+	op.op.SeqNo = args.SeqNo
 
-	hash := hashClientAndSerial(op.op.Client, op.op.ReqSerial)
+	hash := hashClientAndSeqNo(op.op.Client, op.op.SeqNo)
 	kv.ops[hash] = op
 
 	kv.mu.Unlock()
 
 	logIndex, _, _ := kv.rf.Start(op.op)
 
-	kv.DPrintf("[%s] From client %d, key = %s, value = %s, serial = %d, log = %d.\n",
-		args.Op, args.Client, args.Key, args.Value, args.ReqSerial, logIndex)
+	kv.DPrintf("[%s] From client %d, key = %s, value = %s, seqno = %d, log = %d.\n",
+		args.Op, args.Client, args.Key, args.Value, args.SeqNo, logIndex)
 
 	// Timer is necessary as this log can never be committed if server loses its leadership.
 	timer := time.NewTimer(time.Duration(250) * time.Millisecond)
 
 	select {
 		case <- timer.C: {
-			kv.DPrintf("[%s] TimeOut. Client %d, key = %s, value = %s, serial = %d.\n",
-				args.Op, args.Client, args.Key, args.Value, args.ReqSerial)
+			kv.DPrintf("[%s] TimeOut. Client %d, key = %s, value = %s, seqno = %d.\n",
+				args.Op, args.Client, args.Key, args.Value, args.SeqNo)
 			reply.Err = TimeOut
 		}
 		case <-op.doneCh: {
-			kv.DPrintf("[%s] Executed OK. Client %d, key = %s, value = %s, serial = %d.\n",
-				args.Op, args.Client, args.Key, args.Value, args.ReqSerial)
+			kv.DPrintf("[%s] Executed OK. Client %d, key = %s, value = %s, seqno = %d.\n",
+				args.Op, args.Client, args.Key, args.Value, args.SeqNo)
 		}
 	}
 
@@ -205,17 +205,17 @@ func (kv *RaftKV) executeLog(applyMsg raft.ApplyMsg) {
 
 	op := applyMsg.Command.(Op)
 
-	if kv.executedTo[op.Client] > op.ReqSerial {
+	if kv.executedTo[op.Client] > op.SeqNo {
 		// This is an already committed log. Ignore.
-		kv.DPrintf("Committing an already committed log %d, client = %d, serial = %d, %d %s %s. Ignored.\n",
-			applyMsg.Index, op.Client, op.ReqSerial, op.Type, op.Key, op.Value)
+		kv.DPrintf("Committing an already committed log %d, client = %d, seqno = %d, %d %s %s. Ignored.\n",
+			applyMsg.Index, op.Client, op.SeqNo, op.Type, op.Key, op.Value)
 		return
-	} else if op.ReqSerial - kv.executedTo[op.Client] > 1 {
-		kv.DPrintf("FATAL: Missing logs client = %d, %d %d.\n", op.Client, kv.executedTo[op.Client], op.ReqSerial)
+	} else if op.SeqNo - kv.executedTo[op.Client] > 1 {
+		kv.DPrintf("FATAL: Missing logs client = %d, %d %d.\n", op.Client, kv.executedTo[op.Client], op.SeqNo)
 		panic("Missing logs.")
 	}
 
-	alreadyCommitted := (kv.executedTo[op.Client] == op.ReqSerial)
+	alreadyCommitted := (kv.executedTo[op.Client] == op.SeqNo)
 
 	if !alreadyCommitted {
 		if op.Type == Get {
@@ -227,9 +227,9 @@ func (kv *RaftKV) executeLog(applyMsg raft.ApplyMsg) {
 		}
 	}
 
-	kv.executedTo[op.Client] = op.ReqSerial
+	kv.executedTo[op.Client] = op.SeqNo
 
-	pendingOp, was := kv.ops[hashClientAndSerial(op.Client, op.ReqSerial)]
+	pendingOp, was := kv.ops[hashClientAndSeqNo(op.Client, op.SeqNo)]
 	if was {
 		if op.Type == Get {
 			pendingOp.value = kv.lastResult[op.Client]
