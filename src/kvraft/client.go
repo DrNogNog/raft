@@ -2,36 +2,30 @@ package raftkv
 
 import (
 	"labrpc"
-	"sync"
+	"crypto/rand"
+	"math/big"
 )
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 
-	// You will have to modify this struct.
 	me         int  // client id
 	seqNo      int  // sequence number for next request
 	lastLeader int  // last cached leader
 }
 
-var CLIENT_MUTEX sync.Mutex
-var CLIENT_ALLOC_ID int = 1
-
-func increaseClientId() {
-	CLIENT_ALLOC_ID += 1
+func nrand() int {
+	max := big.NewInt(int64(1) << 30)
+	bigx, _ := rand.Int(rand.Reader, max)
+	x := bigx.Int64()
+	return int(x)
 }
 
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
 
-	// You'll have to add code here.
-
-	CLIENT_MUTEX.Lock()
-	defer CLIENT_MUTEX.Unlock()
-	defer increaseClientId()
-
-	ck.me = CLIENT_ALLOC_ID
+	ck.me = nrand()
 	ck.seqNo = 1
 	ck.lastLeader = -1
 

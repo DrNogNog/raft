@@ -23,16 +23,15 @@ const (
 type Op struct {
 	Type      OpType
 	Key       string
-	Value     string  // value is returned here for Get
+	Value     string  // Put and Append only
 
 	Client    int
 	SeqNo     int
 }
 
 type RaftOp struct {
-	op Op
-	value  string  // Get only
-	doneCh (chan struct{})
+	op     Op
+	doneCh (chan interface{})
 }
 
 type RaftKV struct {
@@ -46,7 +45,7 @@ type RaftKV struct {
 
 	kv         map[string]string
 	executedTo map[int]int        // sequence number of request the client is executed to
-	lastResult map[int]string     // execution result of last request
+	lastResult map[int]string     // execution result of last request (Get only)
 	ops        map[int64]*RaftOp  // pending ops, keyed by client and request sequence number
 
 	killCh     chan struct{}
@@ -63,9 +62,37 @@ func hashClientAndSeqNo(client int, seqNo int) int64 {
 	return int64(client) << 32 | int64(seqNo)
 }
 
-func (kv *RaftKV) Get(args GetArgs, reply *GetReply) {
+func (kv *RaftKV) createOp(opType OpType, client int, seqNo int) (*RaftOp, int64) {
+	op := new(RaftOp)
+
+	op.doneCh = make(chan interface{})
+	op.op.Type = opType
+	op.op.Client = client
+	op.op.SeqNo = seqNo
+	op.op.Type = opType
+
+	hash := hashClientAndSeqNo(client, seqNo)
+	kv.ops[hash] = op
+
+	return op, hash
+}
+
+func (kv *RaftKV) destroyOp(op *RaftOp, hash int64) {
+	select {
+		case <-op.doneCh:
+		default:
+	}
+	close(op.doneCh)
+	delete(kv.ops, hash)
+}
+
+func (kv *RaftKV) isLeader() bool {
 	_, isLeader := kv.rf.GetState()
-	if !isLeader {
+	return isLeader
+}
+
+func (kv *RaftKV) Get(args GetArgs, reply *GetReply) {
+	if !kv.isLeader() {
 		reply.Err = WrongLeader
 		return
 	}
@@ -87,16 +114,8 @@ func (kv *RaftKV) Get(args GetArgs, reply *GetReply) {
 		return
 	}
 
-	op := new(RaftOp)
-
-	op.doneCh = make(chan struct{})
-	op.op.Client = args.Client
+	op, hash := kv.createOp(Get, args.Client, args.SeqNo)
 	op.op.Key = args.Key
-	op.op.Type = Get
-	op.op.SeqNo = args.SeqNo
-
-	hash := hashClientAndSeqNo(op.op.Client, op.op.SeqNo)
-	kv.ops[hash] = op
 
 	kv.mu.Unlock()
 
@@ -107,35 +126,26 @@ func (kv *RaftKV) Get(args GetArgs, reply *GetReply) {
 
 	// Timer is necessary as this log can never be committed if server loses leadership.
 	timer := time.NewTimer(time.Duration(300) * time.Millisecond)
-
 	select {
 		case <- timer.C: {
-			kv.DPrintf("[Get] TimeOut. Client %d, key = %s, seqno = %d.\n", args.Client, args.Key, args.SeqNo)
+			kv.DPrintf("[Get] TimeOut. Client %d, key = %s, seqno = %d.\n",
+				args.Client, args.Key, args.SeqNo)
 			reply.Err = TimeOut
 		}
-		case <-op.doneCh: {
-			kv.DPrintf("[Get] Executed OK. Client %d, key = %s, seqno = %d.\n", args.Client, args.Key, args.SeqNo)
-			kv.mu.Lock()
-			reply.Value = op.value
-			kv.mu.Unlock()
+		case value := <-op.doneCh: {
+			kv.DPrintf("[Get] Executed OK. Client %d, key = %s, seqno = %d.\n",
+				args.Client, args.Key, args.SeqNo)
+			reply.Value = value.(string)
 		}
 	}
 
 	kv.mu.Lock()
-	// FIXME: Find a more elegant way to synchronize between go routines, as close a channel in
-	// receiver is not recommended in golang.
-	select {
-		case <-op.doneCh:
-		default:
-	}
-	close(op.doneCh)
-	delete(kv.ops, hash)
+	kv.destroyOp(op, hash)
 	kv.mu.Unlock()
 }
 
 func (kv *RaftKV) PutAppend(args PutAppendArgs, reply *PutAppendReply) {
-	_, isLeader := kv.rf.GetState()
-	if !isLeader {
+	if !kv.isLeader() {
 		reply.Err = WrongLeader
 		return
 	}
@@ -149,21 +159,15 @@ func (kv *RaftKV) PutAppend(args PutAppendArgs, reply *PutAppendReply) {
 		return
 	}
 
-	op := new(RaftOp)
-
-	op.doneCh = make(chan struct{})
-	op.op.Client = args.Client
+	var opType OpType
+	if args.Op == "Put" {
+		opType = Put
+	} else {
+		opType = Append
+	}
+	op, hash := kv.createOp(opType, args.Client, args.SeqNo)
 	op.op.Key = args.Key
 	op.op.Value = args.Value
-	if args.Op == "Put" {
-		op.op.Type = Put
-	} else {
-		op.op.Type = Append
-	}
-	op.op.SeqNo = args.SeqNo
-
-	hash := hashClientAndSeqNo(op.op.Client, op.op.SeqNo)
-	kv.ops[hash] = op
 
 	kv.mu.Unlock()
 
@@ -174,7 +178,6 @@ func (kv *RaftKV) PutAppend(args PutAppendArgs, reply *PutAppendReply) {
 
 	// Timer is necessary as this log can never be committed if server loses its leadership.
 	timer := time.NewTimer(time.Duration(250) * time.Millisecond)
-
 	select {
 		case <- timer.C: {
 			kv.DPrintf("[%s] TimeOut. Client %d, key = %s, value = %s, seqno = %d.\n",
@@ -188,14 +191,7 @@ func (kv *RaftKV) PutAppend(args PutAppendArgs, reply *PutAppendReply) {
 	}
 
 	kv.mu.Lock()
-	// FIXME: Find a more elegant way to synchronize between go routines, as close a channel in
-	// receiver is not recommended in golang.
-	select {
-		case <-op.doneCh:
-		default:
-	}
-	close(op.doneCh)
-	delete(kv.ops, hash)
+	kv.destroyOp(op, hash)
 	kv.mu.Unlock()
 }
 
@@ -231,11 +227,14 @@ func (kv *RaftKV) executeLog(applyMsg raft.ApplyMsg) {
 
 	pendingOp, was := kv.ops[hashClientAndSeqNo(op.Client, op.SeqNo)]
 	if was {
+		var value interface{}
 		if op.Type == Get {
-			pendingOp.value = kv.lastResult[op.Client]
+			value = kv.lastResult[op.Client]
+		} else {
+			value = struct{}{}
 		}
 		select {
-			case pendingOp.doneCh <- struct{}{}:
+			case pendingOp.doneCh <- value:
 			default:
 		}
 	}
