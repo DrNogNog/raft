@@ -14,7 +14,7 @@ package shardmaster
 // #0 is the initial configuration, with no groups and all shards
 // assigned to group 0 (the invalid group).
 //
-// A GID is a replica group ID. GIDs must be uniqe and > 0.
+// A GID is a replica group ID. GIDs must be unique and > 0.
 // Once a GID joins, and leaves, it should never join again.
 //
 // You will need to add fields to the RPC arguments.
@@ -32,45 +32,56 @@ type Config struct {
 }
 
 const (
-	OK = "OK"
+	OK          = "OK"
+	BadRequest  = "BadRequest"
+	TimeOut     = "TimeOut"
+	WrongLeader = "WrongLeader"
 )
 
 type Err string
 
 type JoinArgs struct {
 	Servers map[int][]string // new GID -> servers mappings
+
+	Client int
+	SeqNo  int
 }
 
 type JoinReply struct {
-	WrongLeader bool
 	Err         Err
 }
 
 type LeaveArgs struct {
 	GIDs []int
+
+	Client int
+	SeqNo  int
 }
 
 type LeaveReply struct {
-	WrongLeader bool
 	Err         Err
 }
 
 type MoveArgs struct {
 	Shard int
 	GID   int
+
+	Client int
+	SeqNo  int
 }
 
 type MoveReply struct {
-	WrongLeader bool
 	Err         Err
 }
 
 type QueryArgs struct {
 	Num int // desired config number
+
+	Client int
+	SeqNo  int
 }
 
 type QueryReply struct {
-	WrongLeader bool
 	Err         Err
 	Config      Config
 }

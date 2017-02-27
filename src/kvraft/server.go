@@ -100,6 +100,7 @@ func (kv *RaftKV) Get(args GetArgs, reply *GetReply) {
 
 	kv.mu.Lock()
 
+	// TODO(foreverbell): Be more correct.
 	// Check if this operation has already been executed.
 	if kv.executedTo[args.Client] > args.SeqNo {
 		// As there is only one client, and the client's request is executed to at least
@@ -153,6 +154,7 @@ func (kv *RaftKV) PutAppend(args PutAppendArgs, reply *PutAppendReply) {
 
 	kv.mu.Lock()
 
+	// TODO(foreverbell): Be more correct.
 	// Check if this operation has already been executed.
 	if kv.executedTo[args.Client] >= args.SeqNo {
 		kv.mu.Unlock()
