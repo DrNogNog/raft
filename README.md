@@ -12,6 +12,10 @@ Features implemented so far:
 * Persistent for recovery from crash
 * Key/Value server built on top of Raft
 
+WIP:
+
+* Shard Key/Value service to improve performance (shard master is done)
+
 # Raft notes
 
 See `Raft.md`.
