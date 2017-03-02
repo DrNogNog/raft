@@ -8,11 +8,13 @@ package shardkv
 // talks to the group that holds the key's shard.
 //
 
-import "labrpc"
-import "crypto/rand"
-import "math/big"
-import "shardmaster"
-import "time"
+import (
+	"crypto/rand"
+	"labrpc"
+	"math/big"
+	"shardmaster"
+	"time"
+)
 
 //
 // which shard is a key in?
@@ -28,18 +30,20 @@ func key2shard(key string) int {
 	return shard
 }
 
-func nrand() int64 {
-	max := big.NewInt(int64(1) << 62)
+func nrand() int {
+	max := big.NewInt(int64(1) << 30)
 	bigx, _ := rand.Int(rand.Reader, max)
 	x := bigx.Int64()
-	return x
+	return int(x)
 }
 
 type Clerk struct {
 	sm       *shardmaster.Clerk
 	config   shardmaster.Config
 	make_end func(string) *labrpc.ClientEnd
-	// You will have to modify this struct.
+
+	me       int  // client id
+	seqNo    int  // sequence number for next request
 }
 
 //
@@ -55,8 +59,15 @@ func MakeClerk(masters []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 	ck := new(Clerk)
 	ck.sm = shardmaster.MakeClerk(masters)
 	ck.make_end = make_end
-	// You'll have to add code here.
+
+	ck.me = nrand()
+	ck.seqNo = 1
+
 	return ck
+}
+
+func (ck *Clerk) increaseSeqNo() {
+	ck.seqNo += 1
 }
 
 //
@@ -66,8 +77,12 @@ func MakeClerk(masters []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 // You will have to modify this function.
 //
 func (ck *Clerk) Get(key string) string {
-	args := GetArgs{}
+	defer ck.increaseSeqNo()
+
+	var args GetArgs
 	args.Key = key
+	args.Client = ck.me
+	args.SeqNo = ck.seqNo
 
 	for {
 		shard := key2shard(key)
@@ -78,10 +93,10 @@ func (ck *Clerk) Get(key string) string {
 				srv := ck.make_end(servers[si])
 				var reply GetReply
 				ok := srv.Call("ShardKV.Get", &args, &reply)
-				if ok && reply.WrongLeader == false && (reply.Err == OK || reply.Err == ErrNoKey) {
+				if ok && reply.Err == OK {
 					return reply.Value
 				}
-				if ok && (reply.Err == ErrWrongGroup) {
+				if ok && (reply.Err == WrongGroup) {
 					break
 				}
 			}
@@ -99,11 +114,14 @@ func (ck *Clerk) Get(key string) string {
 // You will have to modify this function.
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
-	args := PutAppendArgs{}
+	defer ck.increaseSeqNo()
+
+	var args PutAppendArgs
 	args.Key = key
 	args.Value = value
 	args.Op = op
-
+	args.Client = ck.me
+	args.SeqNo = ck.seqNo
 
 	for {
 		shard := key2shard(key)
@@ -113,10 +131,10 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 				srv := ck.make_end(servers[si])
 				var reply PutAppendReply
 				ok := srv.Call("ShardKV.PutAppend", &args, &reply)
-				if ok && reply.WrongLeader == false && reply.Err == OK {
+				if ok && reply.Err == OK {
 					return
 				}
-				if ok && reply.Err == ErrWrongGroup {
+				if ok && reply.Err == WrongGroup {
 					break
 				}
 			}

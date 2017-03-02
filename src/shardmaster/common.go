@@ -43,45 +43,45 @@ type Err string
 type JoinArgs struct {
 	Servers map[int][]string // new GID -> servers mappings
 
-	Client int
-	SeqNo  int
+	Client  int
+	SeqNo   int
 }
 
 type JoinReply struct {
-	Err         Err
+	Err Err
 }
 
 type LeaveArgs struct {
-	GIDs []int
+	GIDs   []int
 
 	Client int
 	SeqNo  int
 }
 
 type LeaveReply struct {
-	Err         Err
+	Err Err
 }
 
 type MoveArgs struct {
-	Shard int
-	GID   int
+	Shard  int
+	GID    int
 
 	Client int
 	SeqNo  int
 }
 
 type MoveReply struct {
-	Err         Err
+	Err Err
 }
 
 type QueryArgs struct {
-	Num int // desired config number
+	Num    int // desired config number
 
 	Client int
 	SeqNo  int
 }
 
 type QueryReply struct {
-	Err         Err
-	Config      Config
+	Err    Err
+	Config Config
 }
